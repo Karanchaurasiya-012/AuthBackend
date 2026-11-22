@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AuthBackend Docker Build Log</title>
+  <style>
+    :root {
+      --bg: #f4f7f5;
+      --card: #ffffff;
+      --ink: #0f1c24;
+      --muted: #5d7268;
+      --line: #d5e0d9;
+      --ok: #067647;
+      --warn: #b54708;
+      --err: #b42318;
+      --accent: #0f766e;
+    }
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.5;
+    }
+    header {
+      background: #0f1c24;
+      color: #f4f7f5;
+      padding: 1.5rem 1.25rem;
+    }
+    header h1 { margin: 0 0 0.35rem; font-size: 1.6rem; }
+    header p { margin: 0; opacity: 0.85; }
+    main { max-width: 920px; margin: 0 auto; padding: 1.25rem; }
+    .step {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      margin: 0 0 1rem;
+    }
+    .step h2 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+    .meta { color: var(--muted); font-size: 0.92rem; margin-bottom: 0.75rem; }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 0.15rem 0.55rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    .tag-ok { background: #ecfdf3; color: var(--ok); }
+    .tag-warn { background: #fffaeb; color: var(--warn); }
+    .tag-err { background: #fef3f2; color: var(--err); }
+    .tag-info { background: #eef6f4; color: var(--accent); }
+    pre {
+      background: #0f1c24;
+      color: #e8f0ec;
+      padding: 0.85rem 1rem;
+      border-radius: 10px;
+      overflow-x: auto;
+      font-size: 0.86rem;
+    }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    ul { margin: 0.4rem 0 0.2rem 1.2rem; }
+    .conflict {
+      border-left: 4px solid var(--warn);
+      padding-left: 0.75rem;
+      margin-top: 0.75rem;
+      background: #fffaf0;
+      padding: 0.75rem;
+      border-radius: 0 8px 8px 0;
+    }
+    .success-box {
+      border-left: 4px solid var(--ok);
+      background: #ecfdf3;
+      padding: 0.85rem 1rem;
+      border-radius: 0 8px 8px 0;
+      margin-top: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AuthBackend → Docker Build Log</h1>
+    <p>Live diary of steps, commands, conflicts, and fixes. Scope: Backend + PostgreSQL only. Frontend stays on host.</p>
+  </header>
+  <main>
+
+    <section class="step">
+      <h2>Step 0 — Kickoff</h2>
+      <div class="meta"><span class="tag tag-ok">DONE</span> · Following <code>docs/DOCKER_PLAN.md</code></div>
+      <ul>
+        <li>Goal: package AuthBackend + PostgreSQL with Docker Compose</li>
+        <li>Created this log file: <code>AuthBackend/step.html</code></li>
+        <li>Security hardening deferred (as agreed)</li>
+      </ul>
+    </section>
+
+    <section class="step">
+      <h2>Step 1 — Check Docker + host ports</h2>
+      <div class="meta"><span class="tag tag-ok">DONE</span></div>
+      <p><strong>Commands:</strong></p>
+<pre>docker --version
+docker compose version
+ss -ltnp | grep -E ':8080|:5432'
+ls -la keys/
+</pre>
+      <p><strong>Result:</strong></p>
+      <ul>
+        <li>Docker <code>29.1.3</code> available</li>
+        <li>Docker Compose <code>v5.3.1</code> available</li>
+        <li>JWT keys present: <code>keys/private.pem</code>, <code>keys/public.pem</code></li>
+        <li>Maven wrapper present: <code>mvnw</code></li>
+      </ul>
+      <div class="conflict">
+        <strong>Conflict found:</strong> Host PostgreSQL already listening on <code>127.0.0.1:5432</code>.<br/>
+        <strong>Why it matters:</strong> If compose maps <code>5432:5432</code>, Docker cannot bind host port 5432.<br/>
+        <strong>Fix applied:</strong> In <code>docker-compose.yml</code>, map host <code>5433 → container 5432</code>.
+        Backend still connects internally as <code>postgres:5432</code>. Host tools use <code>localhost:5433</code>.
+      </div>
+    </section>
+
+    <section class="step">
+      <h2>Step 2 — Add Docker files</h2>
+      <div class="meta"><span class="tag tag-ok">DONE</span></div>
+      <p>Created:</p>
+      <ul>
+        <li><code>.dockerignore</code> — keep build context small; exclude <code>.env</code>, <code>target/</code>, docs</li>
+        <li><code>Dockerfile</code> — multi-stage: Temurin 17 JDK build → Temurin 17 JRE run</li>
+        <li><code>docker-compose.yml</code> — services <code>postgres</code> + <code>backend</code></li>
+        <li><code>.env.docker.example</code> — notes for Docker DB host/ports</li>
+      </ul>
+      <p><strong>Why multi-stage Dockerfile?</strong> Build needs JDK/Maven; runtime only needs JRE + JAR (smaller image).</p>
+      <p><strong>Why compose overrides <code>DB_URL</code>?</strong> Inside Docker network, DB hostname is service name <code>postgres</code>, not <code>localhost</code>.</p>
+<pre>DB_URL=jdbc:postgresql://postgres:5432/auth_db
+JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
+JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+</pre>
+      <div class="conflict">
+        <strong>Conflict anticipated:</strong> Host <code>keys/private.pem</code> is mode <code>600</code>.
+        A non-root container user cannot read it when mounted.<br/>
+        <strong>Fix applied:</strong> Runtime image runs without dropping to a non-root user for local Docker.
+        Documented for later hardening with proper secret mounts.
+      </div>
+    </section>
+
+    <section class="step">
+      <h2>Step 3 — Build images</h2>
+      <div class="meta"><span class="tag tag-ok">DONE</span></div>
+      <p><strong>Command:</strong></p>
+<pre>cd AuthBackend
+docker compose build
+</pre>
+      <p><strong>What happened:</strong></p>
+      <ul>
+        <li>Pulled Temurin JDK/JRE base images</li>
+        <li>Ran <code>./mvnw -B -DskipTests package</code> inside build stage</li>
+        <li>Produced backend image <code>authbackend-backend</code></li>
+        <li>Exit code: <strong>0</strong></li>
+      </ul>
+    </section>
+
+    <section class="step">
+      <h2>Step 4 — Start stack</h2>
+      <div class="meta"><span class="tag tag-ok">DONE</span></div>
+      <p><strong>Command:</strong></p>
+<pre>docker compose up -d
+</pre>
+      <p><strong>What happened:</strong></p>
+      <ul>
+        <li>Pulled official <code>postgres:14</code></li>
+        <li>Created network <code>authbackend_default</code></li>
+        <li>Created volume <code>authbackend_auth_pgdata</code> (DB data persistence)</li>
+        <li>Started <code>authbackend-postgres</code> → became <strong>healthy</strong></li>
+        <li>Started <code>authbackend-api</code> after healthcheck passed</li>
+      </ul>
+      <p><strong>Useful status command:</strong></p>
+<pre>docker compose ps
+</pre>
+      <p><strong>Observed status:</strong></p>
+<pre>authbackend-postgres   Up (healthy)   0.0.0.0:5433->5432/tcp
+authbackend-api        Up             0.0.0.0:8080->8080/tcp
+</pre>
+    </section>
+
+    <section class="step">
+      <h2>Step 5 — Verify backend + Flyway + API</h2>
+      <div class="meta"><span class="tag tag-ok">DONE</span></div>
+      <p><strong>Commands:</strong></p>
+<pre>docker compose logs --tail=60 backend
+curl -sS http://localhost:8080/api/v1/auth/csrf
+</pre>
+      <p><strong>Backend log highlights:</strong></p>
+      <ul>
+        <li>Connected to <code>jdbc:postgresql://postgres:5432/auth_db</code></li>
+        <li>Flyway applied migrations V1 → V2 → V3 on empty Docker DB</li>
+        <li><code>Started AuthBackendApplication</code> successfully</li>
+      </ul>
+      <div class="success-box">
+        <strong>API check:</strong> <code>GET /api/v1/auth/csrf</code> returned <strong>HTTP 200</strong> with success JSON.
+      </div>
+    </section>
+
+    <section class="step">
+      <h2>Daily commands (after this setup)</h2>
+      <div class="meta"><span class="tag tag-info">REFERENCE</span></div>
+<pre># start
+docker compose up -d
+
+# rebuild after code change
+docker compose up -d --build
+
+# logs
+docker compose logs -f backend
+docker compose logs -f postgres
+
+# stop (keep DB data)
+docker compose down
+
+# stop + DELETE DB volume (destructive)
+docker compose down -v
+
+# SQL shell inside Docker Postgres
+docker compose exec postgres psql -U postgres -d auth_db
+</pre>
+      <ul>
+        <li>API from host/frontend: <code>http://localhost:8080</code></li>
+        <li>Docker Postgres from host tools: <code>localhost:5433</code></li>
+        <li>Keep frontend on host: <code>npm run dev</code> with <code>NEXT_PUBLIC_API_BASE_URL=http://localhost:8080</code></li>
+      </ul>
+    </section>
+
+    <section class="step">
+      <h2>Final result</h2>
+      <div class="meta"><span class="tag tag-ok">SUCCESS</span></div>
+      <ul>
+        <li>Backend runs in Docker container <code>authbackend-api</code></li>
+        <li>PostgreSQL runs in Docker container <code>authbackend-postgres</code></li>
+        <li>Both managed by one compose file</li>
+        <li>Host Postgres port conflict avoided via <code>5433:5432</code></li>
+        <li>Fresh Docker DB migrated by Flyway automatically</li>
+        <li>CSRF endpoint verified on <code>localhost:8080</code></li>
+      </ul>
+      <p><strong>Note:</strong> Docker DB is a <em>new empty database</em> (separate from old host <code>auth_db</code> on port 5432). Old local users/data are not copied automatically.</p>
+    </section>
+
+  </main>
+</body>
+</html>
