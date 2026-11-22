@@ -41,3 +41,4 @@ keys/*.pem
 
 ### Logs ###
 *.log
+step.html
